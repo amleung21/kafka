@@ -27,6 +27,7 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.HashSet;
 
 /**
  * Updates the state for all Global State Stores.
@@ -61,9 +62,11 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
     public Map<TopicPartition, Long> initialize() {
         final Set<String> storeNames = stateMgr.initialize();
         final Map<String, String> storeNameToTopic = topology.storeToChangelogTopic();
+        final Set<String> topics = new HashSet<String>(storeNames.size());
         for (final String storeName : storeNames) {
             final String sourceTopic = storeNameToTopic.get(storeName);
             final SourceNode source = topology.source(sourceTopic);
+            topics.add(sourceTopic);
             deserializers.put(
                 sourceTopic,
                 new RecordDeserializer(
@@ -76,7 +79,12 @@ public class GlobalStateUpdateTask implements GlobalStateMaintainer {
         }
         initTopology();
         processorContext.initialize();
-        return stateMgr.checkpointed();
+
+        // In case checkpointed() returns old topics no longer relevant, prune it to only contain
+        // topics the global thread cares about. i.e. those associated with storeNames
+        final Map<TopicPartition, Long> resultMap = new HashMap<TopicPartition, Long>(stateMgr.checkpointed());
+        resultMap.keySet().removeIf(e -> !topics.contains(e.topic()));
+        return resultMap;
     }
 
     @SuppressWarnings("unchecked")

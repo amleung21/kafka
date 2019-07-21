@@ -55,6 +55,7 @@ public class GlobalStateTaskTest {
 
     private final String topic1 = "t1";
     private final String topic2 = "t2";
+    final Set<String> storeNames = Utils.mkSet("t1-store", "t2-store");
     private final TopicPartition t1 = new TopicPartition(topic1, 1);
     private final TopicPartition t2 = new TopicPartition(topic2, 1);
     private final MockSourceNode sourceOne = new MockSourceNode<>(
@@ -77,7 +78,6 @@ public class GlobalStateTaskTest {
 
     @Before
     public void before() {
-        final Set<String> storeNames = Utils.mkSet("t1-store", "t2-store");
         final Map<String, SourceNode> sourceByTopics = new HashMap<>();
         sourceByTopics.put(topic1, sourceOne);
         sourceByTopics.put(topic2, sourceTwo);
@@ -223,6 +223,27 @@ public class GlobalStateTaskTest {
         globalStateTask.update(new ConsumerRecord<>(topic1, 1, 101, "foo".getBytes(), "foo".getBytes()));
         globalStateTask.flushState();
         assertThat(stateMgr.checkpointed(), equalTo(expectedOffsets));
+    }
+
+    @Test
+    public void shouldInitializeRelevantTopicsOnly() {
+        final Map<TopicPartition, Long> expectedOffsets = new HashMap<>();
+        expectedOffsets.put(t1, 50L);
+        expectedOffsets.put(t2, 100L);
+
+        // add a third, unrelated topic, to offsets
+        final TopicPartition t3 = new TopicPartition("t3", 1);
+        offsets.put(t3, 100L);
+        stateMgr = new GlobalStateManagerStub(storeNames, offsets);
+        globalStateTask = new GlobalStateUpdateTask(topology, context, stateMgr, new LogAndFailExceptionHandler(), logContext);
+
+        // stateMgr will include all topic-partitions, including t3
+        final Map<TopicPartition, Long> expectedOffsetsCP = new HashMap<>(expectedOffsets);
+        expectedOffsetsCP.put(t3, 100L);
+        assertEquals(expectedOffsetsCP, stateMgr.checkpointed());
+
+        // now initialize: will not include t3
+        assertEquals(expectedOffsets, globalStateTask.initialize());
     }
 
 }
